@@ -12,7 +12,7 @@
     <header>
       <div>
         <h1>ResellRadar</h1>
-        <p>Live deal scanner · profit guardrails · $500-bankroll mode</p>
+        <p>Demand-filtered resale scanner · multi-market comps · $500-bankroll mode</p>
       </div>
       <div class="pill">Bankroll ${{ '%.2f'|format(settings['bankroll']) }}</div>
     </header>
@@ -24,7 +24,7 @@
     <section class="stats">
       <article><span>Minimum Profit</span><strong>${{ '%.0f'|format(settings['min_profit']) }}</strong></article>
       <article><span>Minimum ROI</span><strong>{{ '%.0f'|format(settings['min_roi']) }}%</strong></article>
-      <article><span>Committed*</span><strong>${{ '%.2f'|format(committed) }}</strong></article>
+      <article><span>Minimum Demand</span><strong>{{ '%.0f'|format(settings['min_demand_score']) }}/100</strong></article>
       <article><span>Available*</span><strong>${{ '%.2f'|format(available) }}</strong></article>
     </section>
     <p class="hint">*Saved qualifying deals are treated as committed capital.</p>
@@ -32,8 +32,8 @@
     <section class="panel scanner-panel">
       <div class="section-head">
         <div>
-          <h2>Live scanner</h2>
-          <span>Slickdeals front page · every {{ '%.0f'|format(settings['scan_interval_min']) }} min · max buy ${{ '%.0f'|format(settings['max_item_cost']) }}</span>
+          <h2>Demand-filtered radar</h2>
+          <span>Slickdeals discovery · every {{ '%.0f'|format(settings['scan_interval_min']) }} min · max buy ${{ '%.0f'|format(settings['max_item_cost']) }}</span>
         </div>
         <div class="actions">
           <form action="/scan" method="post"><button class="primary" type="submit">Scan now</button></form>
@@ -44,28 +44,35 @@
         <span><b>Status:</b> {% if scanner.running %}scanning…{% else %}ready{% endif %}</span>
         <span><b>Last scan:</b> {{ scanner.last_scan or 'not yet' }}</span>
         <span><b>New last scan:</b> {{ scanner.last_found }}</span>
-        <span><b>eBay API:</b> {% if ebay_enabled %}<em class="goodtxt">connected</em>{% else %}<em>not configured</em>{% endif %}</span>
+        <span><b>Filtered out:</b> {{ filtered_count }} low-demand/unverified</span>
+        <span><b>eBay:</b> {% if ebay_enabled %}<em class="goodtxt">connected</em>{% else %}<em>waiting</em>{% endif %}</span>
+        <span><b>StockX:</b> {% if stockx_enabled %}<em class="goodtxt">connected</em>{% else %}<em>not configured</em>{% endif %}</span>
+        <span><b>GOAT:</b> <em>manual comps</em></span>
       </div>
       {% if scanner.last_error %}<div class="flash error">{{ scanner.last_error }}</div>{% endif %}
-      <p class="hint">BUY requires a matching verified sold-comp rule with ≥5 sales. If eBay API keys are configured, active listings are used only as an asking-price estimate and will show CHECK SOLD instead of BUY.</p>
+      <p class="hint">The main radar hides anything below your demand threshold. Verified sold comps can produce BUY. StockX live bids can prove buyer-side demand and produce CHECK SOLD. eBay active asking prices alone are not counted as demand.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Status</th><th>Deal</th><th>Buy</th><th>Market est.</th><th>Potential</th><th>ROI</th><th>Comps</th><th>Source</th><th></th></tr></thead>
+          <thead><tr><th>Status</th><th>Deal</th><th>Buy</th><th>Market</th><th>Market est.</th><th>Potential</th><th>ROI</th><th>Demand</th><th>Evidence</th><th></th></tr></thead>
           <tbody>
           {% for h in hits %}
             <tr>
               <td><span class="grade g-{{ h.status|lower|replace(' ','-') }}">{{ h.status }}</span></td>
-              <td><strong>{{ h.title }}</strong><small>{{ h.source }} · seen {{ h.last_seen }}</small></td>
+              <td><strong>{{ h.title }}</strong><small>{{ h.source }} · seen {{ h.last_seen }}{% if h.market_notes %}<br>{{ h.market_notes }}{% endif %}</small></td>
               <td>{% if h.buy_price is not none %}${{ '%.2f'|format(h.buy_price) }}{% else %}—{% endif %}</td>
-              <td>{% if h.market_estimate is not none %}${{ '%.2f'|format(h.market_estimate) }}{% else %}—{% endif %}</td>
+              <td>{{ h.best_marketplace or '—' }}</td>
+              <td>
+                {% if h.market_estimate is not none %}${{ '%.2f'|format(h.market_estimate) }}{% else %}—{% endif %}
+                {% if h.stockx_bid is not none or h.stockx_ask is not none %}<small>bid {% if h.stockx_bid is not none %}${{ '%.0f'|format(h.stockx_bid) }}{% else %}—{% endif %} / ask {% if h.stockx_ask is not none %}${{ '%.0f'|format(h.stockx_ask) }}{% else %}—{% endif %}</small>{% endif %}
+              </td>
               <td class="{% if h.potential_profit is not none and h.potential_profit >= 0 %}pos{% elif h.potential_profit is not none %}neg{% endif %}">{% if h.potential_profit is not none %}${{ '%.2f'|format(h.potential_profit) }}{% else %}—{% endif %}</td>
               <td>{% if h.potential_roi is not none %}{{ '%.1f'|format(h.potential_roi) }}%{% else %}—{% endif %}</td>
-              <td>{{ h.comp_count }}</td>
-              <td>{{ h.comp_source or 'none' }}</td>
+              <td><span class="demand d-{{ h.demand_label|lower|replace(' ','-') }}">{{ '%.0f'|format(h.demand_score) }}</span><small>{{ h.demand_label }}</small></td>
+              <td>{{ h.comp_source or 'none' }}{% if h.comp_count %}<small>{{ h.comp_count }} sold</small>{% endif %}</td>
               <td><a class="linkbtn" href="{{ h.deal_url }}" target="_blank" rel="noopener">Open</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="9" class="empty">Scanner is starting. Click Scan now if you want an immediate pull.</td></tr>
+            <tr><td colspan="10" class="empty">Nothing currently clears your {{ '%.0f'|format(settings['min_demand_score']) }}/100 demand threshold. That is intentional—the radar is hiding weak/unverified inventory.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -73,22 +80,22 @@
     </section>
 
     <section class="panel">
-      <h2>Verified sold-comp rules</h2>
-      <p class="hint">Add a model/SKU/keyword you have verified from actual sold listings. When a live deal title contains that keyword, ResellRadar can make a real BUY/SKIP decision.</p>
+      <h2>Marketplace sold comps</h2>
+      <p class="hint">You can save separate eBay, StockX, or GOAT comps for the same SKU. ResellRadar chooses the marketplace with the best projected net payout, then requires demand before surfacing it on the main radar.</p>
       <form action="/comps/add" method="post" class="grid">
-        <label class="span2">Keyword / SKU<input name="keyword" placeholder="e.g. LEGO 75367 or RTX 5070 Ti" required></label>
+        <label class="span2">Keyword / SKU<input name="keyword" placeholder="e.g. DD1391-100 or LEGO 75367" required></label>
         <label>Expected sold price ($)<input name="expected_sell_price" type="number" step="0.01" min="0" required></label>
         <label>Recent sold count<input name="recent_sales" type="number" min="0" value="5"></label>
-        <label>Marketplace<input name="sell_marketplace" value="eBay"></label>
+        <label>Marketplace<input name="sell_marketplace" value="eBay" placeholder="eBay, StockX, GOAT"></label>
         <label>Fee (%)<input name="fee_pct" type="number" step="0.01" value="{{ settings['default_fee_pct'] }}"></label>
         <label>Ship to buyer ($)<input name="outbound_shipping" type="number" step="0.01" min="0" value="0"></label>
         <label>Notes<input name="notes" placeholder="Sold median, condition, date checked"></label>
-        <button class="primary span2" type="submit">Save comp + rescan</button>
+        <button class="primary span2" type="submit">Save marketplace comp + rescan</button>
       </form>
       {% if rules %}
       <div class="rule-grid">
         {% for r in rules %}
-        <div class="rule-card"><div><strong>{{ r.keyword }}</strong><small>${{ '%.2f'|format(r.expected_sell_price) }} · {{ r.recent_sales }} sold · {{ r.sell_marketplace }}</small></div><form action="/comps/delete/{{ r.id }}" method="post"><button class="danger" type="submit">×</button></form></div>
+        <div class="rule-card"><div><strong>{{ r.keyword }} · {{ r.sell_marketplace }}</strong><small>${{ '%.2f'|format(r.expected_sell_price) }} · {{ r.recent_sales }} sold · {{ '%.2f'|format(r.fee_pct) }}% fee</small></div><form action="/comps/delete/{{ r.id }}" method="post"><button class="danger" type="submit">×</button></form></div>
         {% endfor %}
       </div>
       {% endif %}
@@ -142,6 +149,7 @@
         <label>Bankroll ($)<input name="bankroll" type="number" step="0.01" value="{{ settings['bankroll'] }}"></label>
         <label>Minimum profit ($)<input name="min_profit" type="number" step="0.01" value="{{ settings['min_profit'] }}"></label>
         <label>Minimum ROI (%)<input name="min_roi" type="number" step="0.01" value="{{ settings['min_roi'] }}"></label>
+        <label>Minimum demand (0-100)<input name="min_demand_score" type="number" min="0" max="100" step="1" value="{{ settings['min_demand_score'] }}"></label>
         <label>Default fee (%)<input name="default_fee_pct" type="number" step="0.01" value="{{ settings['default_fee_pct'] }}"></label>
         <label>Cash reserve ($)<input name="reserve_cash" type="number" step="0.01" value="{{ settings['reserve_cash'] }}"></label>
         <label>Scan every (min)<input name="scan_interval_min" type="number" min="1" step="1" value="{{ settings['scan_interval_min'] }}"></label>
